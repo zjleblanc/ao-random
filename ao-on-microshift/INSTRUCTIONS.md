@@ -554,9 +554,13 @@ A run takes about a minute and launches five jobs on AAP, all named `AO Demo | .
 ## Optional: a trusted certificate
 
 The router serves MicroShift's self-signed default certificate (`CN=*.apps.example.com`), so
-browsers warn. To fix it, put a certificate for `<AO_HOST>` in a TLS secret and reference it on
-the Route, or replace MicroShift's default ingress certificate via `ingress.certificateSecret` in
-`/etc/microshift/config.yaml`.
+browsers warn on every visit to `<AO_HOST>`.
+
+**Ask the human:** would they like a trusted certificate installed? There are two options: bring
+one they already have, or have one issued automatically by Let's Encrypt. If yes, follow
+[TLS.md](TLS.md), which covers both, including DNS provider automation (e.g. Cloudflare) for the
+Let's Encrypt path. It picks up from here and returns you to this point when done. If no, skip to
+Phase 12.
 
 To serve AO under a second hostname, add another Route to the `automation-orchestrator-ui`
 service (edge TLS, target port `http`), and add that hostname to
