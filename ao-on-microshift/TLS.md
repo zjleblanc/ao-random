@@ -112,46 +112,25 @@ Continue to [Phase C](#phase-c-point-the-route-at-the-secret) with `<TLS_SECRET_
 
 ## Path B: automated issuance with Let's Encrypt and cert-manager
 
-### Phase B1: Install the cert-manager operator
+### Phase B1: Install cert-manager
 
-Uses the catalog already added in `INSTRUCTIONS.md` Phase 9. The operator lives in
-`cert-manager-operator`; it deploys the actual cert-manager controller, webhook, and CA injector
-into a separate `cert-manager` namespace.
+> **MicroShift note.** The cert-manager Operator for Red Hat OpenShift (OLM-based) fails on
+> MicroShift because its bundle includes a `ConsoleYAMLSample` resource
+> (`console.openshift.io/v1`) that MicroShift does not ship (it has no OpenShift console). The
+> InstallPlan errors out mid-way, leaving the CRDs uninstalled and the CSV stuck in `Pending`.
+> Install **upstream cert-manager** directly instead — it is what the Red Hat operator packages
+> anyway, and all the `Certificate`, `Issuer`, and `ClusterIssuer` APIs are identical.
 
 ```bash
-cat <<'EOF' | oc apply -f -
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: cert-manager-operator
----
-apiVersion: operators.coreos.com/v1
-kind: OperatorGroup
-metadata:
-  name: openshift-cert-manager-operator
-  namespace: cert-manager-operator
-spec: {}
----
-apiVersion: operators.coreos.com/v1alpha1
-kind: Subscription
-metadata:
-  name: openshift-cert-manager-operator
-  namespace: cert-manager-operator
-spec:
-  channel: stable-v1
-  name: openshift-cert-manager-operator
-  source: redhat-operators
-  sourceNamespace: openshift-marketplace
-  installPlanApproval: Automatic
-EOF
+curl -sL https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml \
+  | oc apply -f -
 ```
 
-**Verify:**
+**Verify** (allow ~30 s for pods to start):
 
 ```bash
-oc -n cert-manager-operator get csv                       # Succeeded
 oc get crd certificates.cert-manager.io issuers.cert-manager.io clusterissuers.cert-manager.io
-oc -n cert-manager get pods                                # cert-manager, cert-manager-webhook, cert-manager-cainjector all Running
+oc -n cert-manager get pods   # cert-manager, cert-manager-webhook, cert-manager-cainjector all Running
 ```
 
 ### Phase B2: Create the DNS credential secret
@@ -352,8 +331,7 @@ serving the old cert), your MicroShift build may not support it yet — see
 | `Issuer` never reaches `Ready` | ACME account registration failed (bad `<ACME_EMAIL>`, or a private key reused across server URLs) | `oc -n automation-orchestrator describe issuer ao-letsencrypt`; delete the `privateKeySecretRef` secret and reapply |
 | `Certificate` stuck, `Challenge` stuck `pending` for minutes | DNS-01 TXT record not created or not yet propagated; DNS API token missing permissions | `oc -n automation-orchestrator describe challenge`; for Cloudflare confirm the token has `Zone:DNS:Edit` on the right zone; `dig TXT _acme-challenge.<CERT_DOMAIN>` from the VM |
 | `Order` shows an ACME error about rate limits | Too many production issuance attempts for this domain | Switch to the staging server while testing; Let's Encrypt production allows 5 duplicate certs per week per domain set |
-| `CatalogSource redhat-operators` not `READY`, so the operator Subscription never installs | Same catalog used by AO itself; see `INSTRUCTIONS.md` Phase 9 | Confirm Phase 9's Verify still passes before retrying here |
-| cert-manager operator CSV `Succeeded` but no pods in `cert-manager` namespace | Operator still reconciling the `CertManager` cluster CR | Wait a minute; `oc get certmanager cluster -o yaml` for its status |
+| cert-manager OLM operator CSV stuck `Pending`, InstallPlan error: `ConsoleYAMLSample … not found on the cluster` | MicroShift does not ship the OpenShift console APIs; the Red Hat operator bundle includes a `ConsoleYAMLSample` UI widget that fails to install | Use the upstream cert-manager manifest instead (see Phase B1). Clean up the failed OLM attempt first: `oc delete subscription openshift-cert-manager-operator -n cert-manager-operator && oc delete csv cert-manager-operator.v1.20.0 -n cert-manager-operator && oc delete crd challenges.acme.cert-manager.io orders.acme.cert-manager.io` |
 
 ---
 
@@ -387,9 +365,9 @@ oc -n $NS delete secret ao-custom-tls
 oc -n $NS delete certificate ao-letsencrypt
 oc -n $NS delete issuer ao-letsencrypt
 oc -n $NS delete secret ao-letsencrypt-tls ao-letsencrypt-account-key cloudflare-api-token-secret
-oc delete subscription openshift-cert-manager-operator -n cert-manager-operator
-oc delete csv -n cert-manager-operator --all
-oc delete namespace cert-manager-operator cert-manager
+# Remove upstream cert-manager (installed via manifest, not OLM):
+curl -sL https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml \
+  | oc delete -f -
 ```
 
 Revoke the DNS provider API token (Cloudflare: delete it from **My Profile > API Tokens**) once
